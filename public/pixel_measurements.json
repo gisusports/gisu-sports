@@ -1,0 +1,60 @@
+{
+  "W": 1656,
+  "H": 2483,
+  "circleBottom": "start",
+  "ringFoundAtY": [],
+  "textLines": [
+    {
+      "top": 1632,
+      "bottom": 1702,
+      "height": 71,
+      "darkPixels": 0
+    },
+    {
+      "top": 1740,
+      "bottom": 1792,
+      "height": 53,
+      "darkPixels": 0
+    },
+    {
+      "top": 1869,
+      "bottom": 1897,
+      "height": 29,
+      "darkPixels": 0
+    },
+    {
+      "top": 1941,
+      "bottom": 1965,
+      "height": 25,
+      "darkPixels": 0
+    },
+    {
+      "top": 2123,
+      "bottom": 2232,
+      "height": 110,
+      "darkPixels": 0
+    },
+    {
+      "top": 2241,
+      "bottom": 2247,
+      "height": 7,
+      "darkPixels": 3
+    },
+    {
+      "top": 2249,
+      "bottom": 2250,
+      "height": 2,
+      "darkPixels": 2
+    },
+    {
+      "top": 2288,
+      "bottom": 2482,
+      "height": 195,
+      "darkPixels": 0
+    }
+  ],
+  "mintTop": 1871,
+  "mintBottom": 2267,
+  "mintLeft": 614,
+  "mintRight": 977
+}

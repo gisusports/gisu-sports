@@ -1,0 +1,43 @@
+{
+  "W": 1656,
+  "H": 2483,
+  "darkPxCount": 242201,
+  "bbox": {
+    "minX": 300,
+    "maxX": 1399,
+    "minY": 600,
+    "maxY": 1490
+  },
+  "bboxCenter": {
+    "cx": 850,
+    "cy": 1045
+  },
+  "centroid": {
+    "cx": 988,
+    "cy": 812
+  },
+  "avgDistFromCentroid": 362,
+  "innerEdges": {
+    "right": {
+      "step": 63,
+      "x": 1051,
+      "y": 812
+    },
+    "left": {
+      "step": 370,
+      "x": 618,
+      "y": 812
+    },
+    "up": {
+      "step": 37,
+      "x": 988,
+      "y": 775
+    }
+  },
+  "innerRadius": {
+    "right": 63,
+    "left": 370,
+    "down": null,
+    "up": 37
+  }
+}
