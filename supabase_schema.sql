@@ -210,3 +210,39 @@ ON public.newsletter_subscribers FOR SELECT USING (true);
 DROP POLICY IF EXISTS "Allow deleting newsletter subscribers" ON public.newsletter_subscribers;
 CREATE POLICY "Allow deleting newsletter subscribers" 
 ON public.newsletter_subscribers FOR DELETE USING (true);
+
+-- 10. Optional Stored Function to Guarantee Sequential Unique Sports ID Number
+CREATE OR REPLACE FUNCTION public.get_next_card_number(year_prefix TEXT DEFAULT '2026')
+RETURNS TEXT
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+    next_num INTEGER;
+    formatted_num TEXT;
+    candidate_card_number TEXT;
+    full_prefix TEXT := 'GICS/' || year_prefix || '/';
+BEGIN
+    SELECT COALESCE(
+        MAX(
+            NULLIF(regexp_replace(card_number, '^GICS/[0-9]{4}/', ''), '')::INTEGER
+        ), 3
+    ) + 1 INTO next_num
+    FROM public.id_cards
+    WHERE card_number LIKE full_prefix || '%';
+
+    IF next_num < 4 THEN
+        next_num := 4;
+    END IF;
+
+    LOOP
+        formatted_num := lpad(next_num::TEXT, 4, '0');
+        candidate_card_number := full_prefix || formatted_num;
+        IF NOT EXISTS (SELECT 1 FROM public.id_cards WHERE card_number = candidate_card_number) THEN
+            RETURN candidate_card_number;
+        END IF;
+        next_num := next_num + 1;
+    END LOOP;
+END;
+$$;
+

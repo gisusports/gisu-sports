@@ -9,6 +9,7 @@ import { sendAthleteIdEmail } from '../services/emailService';
 import { generateCardPdf, downloadCardPdf } from '../utils/pdfGenerator';
 import { compressPassportImage } from '../utils/imageCompressor';
 import { IdCardRecord } from '../types';
+import { supabase, isSupabaseConfigured, mapRowToCard } from '../lib/supabase';
 import { 
   CreditCard, 
   Upload, 
@@ -148,7 +149,7 @@ export const SportIdPage: React.FC = () => {
   };
 
   // Form Submission
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError('');
     setDuplicateCard(null);
@@ -190,7 +191,7 @@ export const SportIdPage: React.FC = () => {
       return;
     }
 
-    // STRICT ONE-TIME REGISTRATION ENFORCEMENT
+    // STRICT ONE-TIME REGISTRATION ENFORCEMENT (Local preliminary check)
     const cleanMatric = matricNumber.trim().toUpperCase();
     const cleanEmail = email.trim().toLowerCase();
     const cleanPhone = phone.trim();
@@ -213,12 +214,13 @@ export const SportIdPage: React.FC = () => {
       return;
     }
 
-    // STAGE 1: Transition directly into "Generating ID..."
+    // STAGE 1: Transition into "Generating ID..."
     setSubmissionStage('generating');
     setGenerationProgress(20);
-    setGenerationMessage('Verifying student biodata & institutional clearance...');
+    setGenerationMessage('Verifying student biodata & institutional registry...');
 
-    const newCard = addIdCard({
+    // Asynchronously allocate unique card number and persist to Supabase
+    const result = await addIdCard({
       fullName: fullName.trim(),
       dateOfBirth,
       age: typeof age === 'number' ? age : 20,
@@ -239,13 +241,21 @@ export const SportIdPage: React.FC = () => {
       nickname: nickname.trim().toUpperCase() || undefined,
     });
 
+    if (!result.success || !result.card) {
+      setSubmissionStage('idle');
+      if (result.isDuplicate && result.card) {
+        setDuplicateCard(result.card);
+      }
+      setFormError(result.error || 'Registration failed. Please verify your details and try again.');
+      return;
+    }
+
+    const newCard = result.card;
     setCreatedCard(newCard);
 
     // Progress animation step 2: Barcode minting
-    setTimeout(() => {
-      setGenerationProgress(50);
-      setGenerationMessage('Minting tamper-proof CODE128 security barcode...');
-    }, 500);
+    setGenerationProgress(50);
+    setGenerationMessage('Minting tamper-proof CODE128 security barcode...');
 
     // Progress animation step 3: 2-Page PDF generation & Email Dispatch
     setTimeout(async () => {
@@ -282,7 +292,7 @@ export const SportIdPage: React.FC = () => {
       setTimeout(() => {
         setSubmissionStage('success');
       }, 500);
-    }, 1100);
+    }, 600);
   };
 
   // Reset form cleanly for another application
@@ -311,21 +321,52 @@ export const SportIdPage: React.FC = () => {
   };
 
   // Handle Search for Existing Card
-  const handleSearchCard = (e: React.FormEvent) => {
+  const handleSearchCard = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!searchMatric.trim()) return;
 
     const query = searchMatric.trim().toUpperCase();
-    const found = idCards.find(
+    const cleanEmail = searchMatric.trim().toLowerCase();
+
+    // 1. Check locally first
+    const foundLocal = idCards.find(
       (c) =>
         c.matricNumber.toUpperCase() === query ||
         c.cardNumber.toUpperCase() === query ||
         c.phone.trim() === query ||
-        c.email.toLowerCase() === searchMatric.trim().toLowerCase()
+        c.email.toLowerCase() === cleanEmail
     );
 
-    setSearchedCard(found || null);
-    setSearchAttempted(true);
+    if (foundLocal) {
+      setSearchedCard(foundLocal);
+      setSearchAttempted(true);
+      return;
+    }
+
+    // 2. Query Supabase cloud database if not found in local cache
+    if (isSupabaseConfigured()) {
+      try {
+        const { data, error } = await supabase
+          .from('id_cards')
+          .select('*')
+          .or(`card_number.ilike.${query},matric_number.ilike.${query},phone.ilike.${query},email.ilike.${cleanEmail}`)
+          .limit(1);
+
+        if (!error && data && data.length > 0) {
+          const cloudCard = mapRowToCard(data[0]);
+          setSearchedCard(cloudCard);
+        } else {
+          setSearchedCard(null);
+        }
+      } catch {
+        setSearchedCard(null);
+      } finally {
+        setSearchAttempted(true);
+      }
+    } else {
+      setSearchedCard(null);
+      setSearchAttempted(true);
+    }
   };
 
   return (

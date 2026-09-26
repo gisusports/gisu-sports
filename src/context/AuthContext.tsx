@@ -5,6 +5,8 @@ import { INITIAL_MATCHES } from '../data/matchesData';
 import { 
   fetchCardsFromSupabase, 
   insertCardToSupabase, 
+  insertCardWithUniqueNumber,
+  checkSupabaseDuplicate,
   deleteCardFromSupabase, 
   updateCardStatusInSupabase, 
   authenticateExecutiveWithDb, 
@@ -25,7 +27,7 @@ interface AuthContextType {
   logout: () => void;
   
   idCards: IdCardRecord[];
-  addIdCard: (card: Omit<IdCardRecord, 'id' | 'cardNumber' | 'issuedAt'>) => IdCardRecord;
+  addIdCard: (card: Omit<IdCardRecord, 'id' | 'cardNumber' | 'issuedAt'>) => Promise<{ success: boolean; card?: IdCardRecord; error?: string; isDuplicate?: boolean }>;
   updateCardStatus: (cardId: string, status: IdCardRecord['status']) => void;
   deleteIdCard: (cardId: string) => void;
   refreshCardsFromCloud: () => Promise<void>;
@@ -382,38 +384,65 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     );
   };
 
-  const addIdCard = (cardData: Omit<IdCardRecord, 'id' | 'cardNumber' | 'issuedAt'>): IdCardRecord => {
-    // Enforce One-Time Registration by checking for existing card with same matric or email
-    const existing = checkExistingCard(cardData.matricNumber, cardData.email);
-    if (existing) {
-      return existing;
+  const addIdCard = async (
+    cardData: Omit<IdCardRecord, 'id' | 'cardNumber' | 'issuedAt'>
+  ): Promise<{ success: boolean; card?: IdCardRecord; error?: string; isDuplicate?: boolean }> => {
+    // 1. Strict Duplicate Check locally
+    const existingLocal = checkExistingCard(cardData.matricNumber, cardData.email);
+    if (existingLocal) {
+      return {
+        success: false,
+        card: existingLocal,
+        isDuplicate: true,
+        error: `An official athlete accreditation already exists for this student (${existingLocal.matricNumber} • Card: ${existingLocal.cardNumber}). Duplicate registrations are prohibited.`,
+      };
     }
 
-    const currentYear = new Date().getFullYear();
-    const count = idCards.length + 1;
-    const padded = count.toString().padStart(4, '0');
-    const cardNumber = `GICS/${currentYear}/${padded}`;
+    // 2. Strict Duplicate Check in Cloud Database
+    if (isSupabaseConfigured()) {
+      const existingCloud = await checkSupabaseDuplicate(
+        cardData.matricNumber,
+        cardData.email,
+        cardData.phone
+      );
+      if (existingCloud) {
+        // Sync into local state for visibility
+        setIdCards((prev) => {
+          if (prev.some((c) => c.matricNumber.toUpperCase() === existingCloud.matricNumber.toUpperCase())) {
+            return prev;
+          }
+          return [existingCloud, ...prev];
+        });
+        return {
+          success: false,
+          card: existingCloud,
+          isDuplicate: true,
+          error: `An official athlete accreditation already exists in the central registry for ${existingCloud.matricNumber} (Card: ${existingCloud.cardNumber}). Duplicate registrations are prohibited.`,
+        };
+      }
+    }
 
-    const newCard: IdCardRecord = {
-      ...cardData,
-      id: `card-${Date.now()}`,
-      cardNumber,
-      issuedAt: new Date().toISOString().split('T')[0],
-      status: 'Active',
-      qrVerificationUrl: `https://gisu-sports.oauife.edu.ng/verify/${cardNumber}`,
-    };
+    // 3. Atomically allocate guaranteed unique card number and persist to Supabase
+    const result = await insertCardWithUniqueNumber(cardData, idCards);
+    if (!result.success || !result.card) {
+      return {
+        success: false,
+        error: result.error || 'Failed to securely register sports ID. Please check your connection and try again.',
+      };
+    }
 
-    setIdCards((prev) => [newCard, ...prev]);
+    const finalCard = result.card;
+
+    // 4. Update local state immediately so Athlete Roster, Console, and Verify reflect it
+    setIdCards((prev) => {
+      const filtered = prev.filter(
+        (c) => c.matricNumber.toUpperCase() !== finalCard.matricNumber.toUpperCase()
+      );
+      return [finalCard, ...filtered];
+    });
     localStorage.removeItem('gisu_cards_last_fetched');
 
-    // Persist to Supabase Cloud DB asynchronously
-    if (isSupabaseConfigured()) {
-      insertCardToSupabase(newCard).catch((err) =>
-        console.warn('[Supabase] Failed to sync new card:', err)
-      );
-    }
-
-    return newCard;
+    return { success: true, card: finalCard };
   };
 
   const updateCardStatus = (cardId: string, status: IdCardRecord['status']) => {

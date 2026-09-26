@@ -121,6 +121,118 @@ export async function insertCardToSupabase(card: IdCardRecord): Promise<{ succes
 }
 
 /**
+ * Inserts a newly minted sports ID card with a guaranteed unique card number.
+ * Automatically queries Supabase and local cache for used numbers, picks the next available sequence,
+ * and retries up to 6 times if a concurrent collision occurs.
+ */
+export async function insertCardWithUniqueNumber(
+  cardData: Omit<IdCardRecord, 'id' | 'cardNumber' | 'issuedAt'>,
+  localCards: IdCardRecord[] = []
+): Promise<{ success: boolean; card?: IdCardRecord; error?: string }> {
+  const currentYear = new Date().getFullYear();
+  const prefix = `GICS/${currentYear}/`;
+
+  // 1. Gather all existing card numbers
+  const usedNumbers = new Set<number>();
+  for (const c of localCards) {
+    if (c.cardNumber && c.cardNumber.startsWith(prefix)) {
+      const num = parseInt(c.cardNumber.replace(prefix, ''), 10);
+      if (!isNaN(num)) usedNumbers.add(num);
+    }
+  }
+
+  if (isSupabaseConfigured()) {
+    try {
+      const { data } = await supabase
+        .from('id_cards')
+        .select('card_number')
+        .like('card_number', `${prefix}%`);
+      if (data) {
+        for (const row of data) {
+          if (row.card_number && row.card_number.startsWith(prefix)) {
+            const num = parseInt(row.card_number.replace(prefix, ''), 10);
+            if (!isNaN(num)) usedNumbers.add(num);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[Supabase] Warning fetching used card numbers:', e);
+    }
+  }
+
+  // 2. Find next available candidate number starting at 4 (since 0003 is Afolabi, 0042 is Paul Awosiyan)
+  let candidateNum = 4;
+  while (usedNumbers.has(candidateNum)) {
+    candidateNum++;
+  }
+
+  const maxAttempts = 6;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const padded = candidateNum.toString().padStart(4, '0');
+    const cardNumber = `${prefix}${padded}`;
+    const cardId = `card-${Date.now()}-${candidateNum}`;
+
+    const newCard: IdCardRecord = {
+      ...cardData,
+      id: cardId,
+      cardNumber,
+      issuedAt: new Date().toISOString().split('T')[0],
+      status: 'Active',
+      qrVerificationUrl: `https://gisu-sports.oauife.edu.ng/verify/${cardNumber}`,
+    };
+
+    if (!isSupabaseConfigured()) {
+      return { success: true, card: newCard };
+    }
+
+    const row = mapCardToRow(newCard);
+    const { error } = await supabase.from('id_cards').insert([row]);
+
+    if (!error) {
+      return { success: true, card: newCard };
+    }
+
+    console.warn(`[Supabase] Insert attempt ${attempt + 1} with ${cardNumber} resulted in:`, error.message);
+
+    // Collision on card_number: mark candidate as used, advance, and retry
+    if (
+      error.message.includes('id_cards_card_number_key') ||
+      error.message.includes('card_number') ||
+      error.code === '23505'
+    ) {
+      usedNumbers.add(candidateNum);
+      candidateNum++;
+      while (usedNumbers.has(candidateNum)) {
+        candidateNum++;
+      }
+      continue;
+    }
+
+    // Duplicate matric / email / phone
+    if (
+      error.message.includes('matric_number') ||
+      error.message.includes('email') ||
+      error.message.includes('phone')
+    ) {
+      return {
+        success: false,
+        error: 'An athlete is already accredited with this Matriculation Number, Email, or Phone in the official registry.',
+      };
+    }
+
+    return {
+      success: false,
+      error: error.message || 'Failed to save athlete record to database.',
+    };
+  }
+
+  return {
+    success: false,
+    error: 'Could not allocate a unique card number after multiple attempts. Please try again.',
+  };
+}
+
+/**
  * Queries Supabase directly to enforce the one-time registration rule in the cloud database
  */
 export async function checkSupabaseDuplicate(

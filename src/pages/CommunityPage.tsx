@@ -1,20 +1,39 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { Users, Search, ShieldCheck, Sparkles, Filter, CheckCircle2, ChevronRight, RefreshCw, Trophy, BookOpen } from 'lucide-react';
+import { Users, Search, ShieldCheck, Sparkles, Filter, CheckCircle2, ChevronRight, RefreshCw, Trophy, BookOpen, RotateCcw } from 'lucide-react';
 import { OAU_FACULTIES, SPORTS_LIST } from '../data/sportsData';
 
 export const CommunityPage: React.FC = () => {
-  const { idCards } = useAuth();
+  const { idCards, refreshCardsFromCloud } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedFaculty, setSelectedFaculty] = useState<string>('All');
   const [selectedSport, setSelectedSport] = useState<string>('All');
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // Auto-refresh registry from Supabase on mount
+  useEffect(() => {
+    refreshCardsFromCloud();
+  }, []);
+
+  const handleManualRefresh = async () => {
+    setIsRefreshing(true);
+    await refreshCardsFromCloud();
+    setIsRefreshing(false);
+  };
+
+  const normalizeFaculty = (f?: string) => (f || '').replace(/^Faculty of\s+/i, '').trim().toLowerCase();
 
   const filteredAthletes = idCards.filter((athlete) => {
+    const q = searchQuery.toLowerCase().trim();
     const matchesSearch =
-      athlete.fullName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      athlete.matricNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      athlete.department.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesFaculty = selectedFaculty === 'All' || athlete.faculty === selectedFaculty;
+      !q ||
+      athlete.fullName.toLowerCase().includes(q) ||
+      athlete.matricNumber.toLowerCase().includes(q) ||
+      athlete.department.toLowerCase().includes(q) ||
+      (athlete.cardNumber && athlete.cardNumber.toLowerCase().includes(q));
+    const matchesFaculty =
+      selectedFaculty === 'All' ||
+      normalizeFaculty(athlete.faculty) === normalizeFaculty(selectedFaculty);
     const matchesSport = selectedSport === 'All' || athlete.sport === selectedSport;
 
     return matchesSearch && matchesFaculty && matchesSport;
@@ -76,15 +95,26 @@ export const CommunityPage: React.FC = () => {
               <Filter className="w-4 h-4 text-[#15803D]" />
               <span>FILTER ATHLETE DIRECTORY</span>
             </div>
-            {(searchQuery || selectedFaculty !== 'All' || selectedSport !== 'All') && (
+            <div className="flex items-center gap-3">
+              {(searchQuery || selectedFaculty !== 'All' || selectedSport !== 'All') && (
+                <button
+                  onClick={resetFilters}
+                  className="text-xs font-mono font-bold text-[#15803D] hover:underline flex items-center gap-1 cursor-pointer"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Reset Filters</span>
+                </button>
+              )}
               <button
-                onClick={resetFilters}
-                className="text-xs font-mono font-bold text-[#15803D] hover:underline flex items-center gap-1 cursor-pointer"
+                onClick={handleManualRefresh}
+                disabled={isRefreshing}
+                title="Sync roster with latest verified registrations from cloud database"
+                className="text-xs font-mono font-bold text-[#071E10] hover:text-[#15803D] bg-white border border-[#E2E8F0] px-3 py-1.5 rounded-full flex items-center gap-1.5 cursor-pointer shadow-2xs hover:shadow-xs transition-all disabled:opacity-50"
               >
-                <RefreshCw className="w-3.5 h-3.5" />
-                <span>Reset Filters</span>
+                <RefreshCw className={`w-3.5 h-3.5 text-[#15803D] ${isRefreshing ? 'animate-spin' : ''}`} />
+                <span>{isRefreshing ? 'Syncing...' : 'Sync Registry'}</span>
               </button>
-            )}
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
